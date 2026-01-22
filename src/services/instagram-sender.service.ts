@@ -31,7 +31,8 @@ export class InstagramSenderService {
     recipientId: string,
     messageText: string
   ): Promise<InstagramApiResponse> {
-    const url = `${this.baseUrl}/${this.apiVersion}/${recipientId}/messages`;
+    // URL correta: me/messages (não recipientId/messages)
+    const url = `${this.baseUrl}/${this.apiVersion}/me/messages`;
 
     const payload: InstagramSendPayload = {
       recipient: { id: recipientId },
