@@ -111,7 +111,6 @@ Tool names: {tool_names}`],
         maxIterations: 5,
         returnIntermediateSteps: false,
         handleParsingErrors: true,
-        earlyStoppingMethod: 'generate',
       });
 
       // Executa o agent
@@ -136,7 +135,16 @@ Tool names: {tool_names}`],
         userId,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw error;
+
+      // Fallback: retorna resposta padrão ao invés de lançar erro
+      // Assim o bot sempre responde algo ao usuário
+      logger.info('Usando resposta fallback devido a erro no Agent', { userId });
+      return {
+        current_funnel_stage: 'Etapa 1: Diagnóstico',
+        identified_vertical: 'DESCONHECIDO',
+        search_required: false,
+        response_message: 'E aí! Qual concurso você tá mirando? Posso te ajudar a traçar a rota!',
+      };
     }
   }
 
