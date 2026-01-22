@@ -19,7 +19,8 @@ RUN npm ci
 # Copiar código fonte
 COPY . .
 
-# Build TypeScript
+# Build TypeScript com mais memória
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm run build
 
 # Stage 2: Production
