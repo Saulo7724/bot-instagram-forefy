@@ -1,23 +1,39 @@
 # Dockerfile para Bot Instagram Forefy
-FROM node:18-alpine
+# Multi-stage build para otimização
 
-# Instalar dependências do sistema
+# Stage 1: Build
+FROM node:18-alpine AS builder
+
+# Instalar dependências do sistema para compilação
 RUN apk add --no-cache python3 make g++
 
-# Definir diretório de trabalho
 WORKDIR /app
 
 # Copiar package files
 COPY package*.json ./
 
-# Instalar dependências
-RUN npm ci --only=production
+# Instalar TODAS as dependências (incluindo devDependencies para tsc)
+RUN npm ci
 
 # Copiar código fonte
 COPY . .
 
 # Build TypeScript
 RUN npm run build
+
+# Stage 2: Production
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copiar package files
+COPY package*.json ./
+
+# Instalar apenas dependências de produção
+RUN npm ci --omit=dev
+
+# Copiar build do stage anterior
+COPY --from=builder /app/dist ./dist
 
 # Criar diretório de logs
 RUN mkdir -p logs
