@@ -12,7 +12,8 @@ WORKDIR /app
 # Copiar package files
 COPY package*.json ./
 
-# Instalar TODAS as dependências (incluindo devDependencies para tsc)
+# Forçar instalação de TODAS as dependências (ignorar NODE_ENV)
+ENV NODE_ENV=development
 RUN npm ci
 
 # Copiar código fonte
@@ -30,6 +31,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Instalar apenas dependências de produção
+ENV NODE_ENV=production
 RUN npm ci --omit=dev
 
 # Copiar build do stage anterior
