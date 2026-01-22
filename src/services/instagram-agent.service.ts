@@ -21,18 +21,18 @@ O Forefy é o "Waze da Aprovação" - uma IA que mapeia bancas e recalcula a rot
 REGRAS CRÍTICAS:
 - Máximo 20 palavras por mensagem
 - Português coloquial: tá, pra, bora
-- Sempre pergunte qual concurso o lead quer
-- Use a tool search_web para buscar notícias de editais quando o lead mencionar um órgão
-- Use a tool documents para buscar informações sobre o Forefy
+- RESPONDA DIRETAMENTE sem usar tools para saudações simples (oi, olá, e aí, etc)
+- Use tools APENAS quando necessário (buscar editais, informações específicas)
 
 FUNIL DE VENDAS:
-1. Pergunte: Qual concurso você mira?
-2. Se mencionar concurso: busque notícias com search_web
-3. Apresente: O Forefy recalcula sua rota todo dia. É o Waze da aprovação.
+1. Saudação recebida → Responda e pergunte: "Qual concurso você tá mirando?"
+2. Concurso mencionado → Busque notícias com search_web se relevante
+3. Apresente: O Forefy recalcula sua rota todo dia
 4. Oferta: Plano Estratégico Anual por R$ 699,90
 5. Link: https://app.forefy.ai/
 
-Responda de forma visceral e direta. Máximo 20 palavras sempre.`;
+IMPORTANTE: Para "oi", "olá", "e aí" responda direto: "E aí! Qual concurso você tá mirando?"
+NÃO use tools para saudações simples. Responda de forma visceral e direta.`;
 
 /**
  * Serviço principal do AI Agent
@@ -108,8 +108,10 @@ Tool names: {tool_names}`],
         tools,
         memory,
         verbose: config.nodeEnv === 'development',
-        maxIterations: 10,
+        maxIterations: 5,
         returnIntermediateSteps: false,
+        handleParsingErrors: true,
+        earlyStoppingMethod: 'generate',
       });
 
       // Executa o agent
@@ -202,12 +204,20 @@ Tool names: {tool_names}`],
         return AgentOutputSchema.parse(json);
       }
 
-      // Fallback final: retorna resposta básica
+      // Fallback final: retorna resposta básica conversacional
+      // Limpa o output de mensagens de erro do sistema
+      let cleanOutput = output;
+      if (output.includes('Agent stopped') || output.includes('max iterations')) {
+        cleanOutput = 'E aí! Qual concurso você tá mirando? Posso te ajudar a traçar a rota!';
+      } else if (output.length > 100) {
+        cleanOutput = output.substring(0, 100);
+      }
+
       return {
         current_funnel_stage: 'Etapa 1: Diagnóstico',
         identified_vertical: 'DESCONHECIDO',
         search_required: false,
-        response_message: output.substring(0, 100),
+        response_message: cleanOutput,
       };
     }
   }
