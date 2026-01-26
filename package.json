@@ -22,28 +22,30 @@
   "author": "Forefy Team",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.6.5",
-    "dotenv": "^16.4.1",
-    "@langchain/openai": "^0.3.14",
     "@langchain/community": "^0.3.16",
     "@langchain/core": "^0.3.19",
-    "langchain": "^0.3.6",
+    "@langchain/google-genai": "^2.1.13",
+    "@langchain/google-vertexai": "^2.1.13",
+    "@langchain/openai": "^0.3.14",
     "@supabase/supabase-js": "^2.39.3",
-    "zod": "^3.22.4",
+    "axios": "^1.6.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.4.1",
+    "express": "^4.18.2",
+    "langchain": "^0.3.6",
     "winston": "^3.11.0",
-    "crypto": "^1.0.1"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.5",
-    "typescript": "^5.3.3",
-    "tsup": "^8.0.1",
-    "tsx": "^4.7.0",
-    "vitest": "^1.2.1",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",
-    "prettier": "^3.2.4"
+    "prettier": "^3.2.4",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.1"
   }
 }

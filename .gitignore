@@ -8,6 +8,9 @@ pnpm-lock.yaml
 .env.local
 .env.*.local
 
+# Google Cloud credentials (sensitive)
+google-credentials.json
+
 # Build output
 dist/
 build/

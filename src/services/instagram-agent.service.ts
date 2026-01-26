@@ -7,6 +7,7 @@ import { AzureOpenAIService } from '../integrations/azure-openai.service';
 import { SupabaseVectorService } from '../integrations/supabase-vector.service';
 import { SerpApiService } from '../integrations/serpapi.service';
 import { MemoryManagerService } from '../integrations/memory-manager.service';
+import { LeadMemoryService, LeadMemory } from '../integrations/lead-memory.service';
 import { AgentOutput, AgentOutputSchema } from '../types/instagram.types';
 import { agentLogger as logger } from '../utils/logger';
 import { config } from '../config';
@@ -42,13 +43,14 @@ Responda de forma natural e ajude o lead a entender como o Forefy pode acelerar 
 
 /**
  * Serviço principal do AI Agent
- * Integra LangChain, Azure OpenAI, RAG, SerpAPI e Memory
+ * Integra LangChain, Azure OpenAI, RAG, SerpAPI, Memory e Lead Memory (persistente)
  */
 export class InstagramAgentService {
   private azureService: AzureOpenAIService;
   private vectorService: SupabaseVectorService;
   private serpService: SerpApiService;
   private memoryService: MemoryManagerService;
+  private leadMemoryService: LeadMemoryService;
   private outputParser: StructuredOutputParser<AgentOutput>;
 
   constructor() {
@@ -56,6 +58,7 @@ export class InstagramAgentService {
     this.vectorService = new SupabaseVectorService();
     this.serpService = new SerpApiService();
     this.memoryService = new MemoryManagerService();
+    this.leadMemoryService = new LeadMemoryService();
 
     // Configura o output parser estruturado
     this.outputParser = StructuredOutputParser.fromZodSchema(AgentOutputSchema);
@@ -80,25 +83,57 @@ export class InstagramAgentService {
     try {
       logger.info('Processando mensagem', { userId, messageLength: message.length });
 
+      // Busca memória persistente do lead
+      let leadMemory = await this.leadMemoryService.getLeadMemory(userId);
+      if (!leadMemory) {
+        leadMemory = this.leadMemoryService.createNewMemory(userId);
+      }
+
+      // Gera contexto do lead para o prompt
+      const leadContext = this.buildLeadContext(leadMemory);
+
       // Cria as tools
       const tools = await this.createTools();
 
       // Cria o modelo
       const model = this.azureService.createAgentModel();
 
-      // Obtém memória do usuário
-      const memory = this.memoryService.getMemory(userId);
+      // Obtém memória de conversa do usuário
+      const conversationMemory = this.memoryService.getMemory(userId);
 
-      // Cria o prompt com instruções de formato
+      // Cria o prompt com contexto do lead
+      const systemMessage = `${SYSTEM_PROMPT}
+
+${leadContext}
+
+IMPORTANTE: Responda de forma natural e conversacional. Sua resposta deve ser curta (max 20 palavras).
+
+Você tem acesso às seguintes ferramentas:
+{tools}
+
+Para usar uma ferramenta, use o seguinte formato JSON:
+\`\`\`json
+{{
+  "action": "nome_da_ferramenta",
+  "action_input": {{"query": "sua busca aqui"}}
+}}
+\`\`\`
+
+Quando tiver a resposta final, use:
+\`\`\`json
+{{
+  "action": "Final Answer",
+  "action_input": "sua resposta aqui"
+}}
+\`\`\`
+
+Ferramentas disponíveis: {tool_names}`;
+
       const prompt = ChatPromptTemplate.fromMessages([
-        ['system', SYSTEM_PROMPT],
-        ['system', `IMPORTANTE: Retorne JSON com: current_funnel_stage, identified_vertical, search_required, response_message (max 20 palavras)
-
-Você tem acesso a estas tools: {tools}
-Tool names: {tool_names}`],
+        ['system', systemMessage],
         ['placeholder', '{chat_history}'],
         ['human', '{input}'],
-        ['placeholder', '{agent_scratchpad}'],
+        ['assistant', '{agent_scratchpad}'],
       ]);
 
       // Cria o agent
@@ -112,7 +147,7 @@ Tool names: {tool_names}`],
       const executor = AgentExecutor.fromAgentAndTools({
         agent,
         tools,
-        memory,
+        memory: conversationMemory,
         verbose: config.nodeEnv === 'development',
         maxIterations: 5,
         returnIntermediateSteps: false,
@@ -129,6 +164,9 @@ Tool names: {tool_names}`],
       // Parseia a resposta
       const parsedOutput = await this.parseAgentOutput(result.output);
 
+      // Atualiza memória persistente do lead
+      await this.updateLeadMemory(userId, message, parsedOutput, leadMemory);
+
       logger.info('Resposta estruturada gerada', {
         userId,
         stage: parsedOutput.current_funnel_stage,
@@ -143,6 +181,172 @@ Tool names: {tool_names}`],
       });
       throw error;
     }
+  }
+
+  /**
+   * Constrói o contexto do lead para o prompt
+   */
+  private buildLeadContext(leadMemory: LeadMemory): string {
+    const parts: string[] = ['CONTEXTO DO LEAD (informações já coletadas):'];
+
+    if (leadMemory.nome) {
+      parts.push(`- Nome: ${leadMemory.nome}`);
+    }
+    if (leadMemory.concurso_interesse) {
+      parts.push(`- Concurso de interesse: ${leadMemory.concurso_interesse}`);
+    }
+    if (leadMemory.area_interesse) {
+      parts.push(`- Área de interesse: ${leadMemory.area_interesse}`);
+    }
+    if (leadMemory.vertical !== 'DESCONHECIDO') {
+      parts.push(`- Vertical: ${leadMemory.vertical}`);
+    }
+    parts.push(`- Estágio atual do funil: ${leadMemory.funnel_stage}`);
+    parts.push(`- Total de interações: ${leadMemory.total_mensagens}`);
+
+    if (leadMemory.objecoes.length > 0) {
+      parts.push(`- Objeções identificadas: ${leadMemory.objecoes.join(', ')}`);
+    }
+    if (leadMemory.ultimo_topico) {
+      parts.push(`- Último tópico discutido: ${leadMemory.ultimo_topico}`);
+    }
+
+    if (parts.length === 1) {
+      return 'CONTEXTO DO LEAD: Primeiro contato. Colete informações básicas.';
+    }
+
+    return parts.join('\n');
+  }
+
+  /**
+   * Atualiza a memória persistente do lead com base na conversa
+   */
+  private async updateLeadMemory(
+    userId: string,
+    userMessage: string,
+    agentOutput: AgentOutput,
+    currentMemory: LeadMemory
+  ): Promise<void> {
+    try {
+      const updates: Partial<LeadMemory> = {
+        funnel_stage: agentOutput.current_funnel_stage,
+        ultimo_topico: userMessage.substring(0, 100),
+      };
+
+      // Atualiza vertical se identificada
+      if (agentOutput.identified_vertical !== 'DESCONHECIDO') {
+        updates.vertical = agentOutput.identified_vertical;
+      }
+
+      // Extrai informações da mensagem do usuário
+      const extractedInfo = this.extractInfoFromMessage(userMessage);
+
+      if (extractedInfo.concurso) {
+        updates.concurso_interesse = extractedInfo.concurso;
+      }
+      if (extractedInfo.nome) {
+        updates.nome = extractedInfo.nome;
+      }
+      if (extractedInfo.area) {
+        updates.area_interesse = extractedInfo.area;
+      }
+
+      // Detecta objeções
+      const objection = this.detectObjection(userMessage);
+      if (objection && !currentMemory.objecoes.includes(objection)) {
+        updates.objecoes = [...currentMemory.objecoes, objection];
+      }
+
+      // Salva atualizações
+      await this.leadMemoryService.updateLeadMemory(userId, updates);
+
+      logger.debug('Memória do lead atualizada', {
+        userId,
+        updates: Object.keys(updates),
+      });
+    } catch (error) {
+      logger.error('Erro ao atualizar memória do lead', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Extrai informações relevantes da mensagem do usuário
+   */
+  private extractInfoFromMessage(message: string): {
+    nome?: string;
+    concurso?: string;
+    area?: string;
+  } {
+    const result: { nome?: string; concurso?: string; area?: string } = {};
+    const lowerMessage = message.toLowerCase();
+
+    // Detecta concursos mencionados
+    const concursos = [
+      'polícia federal', 'pf', 'receita federal', 'rf', 'inss', 'ibge',
+      'banco do brasil', 'bb', 'caixa', 'cef', 'trt', 'tre', 'trf',
+      'tj', 'mp', 'ministério público', 'defensoria', 'oab', 'enem',
+      'medicina', 'residência', 'prf', 'pm', 'pc', 'polícia civil',
+      'polícia militar', 'bombeiro', 'agente', 'escrivão', 'delegado',
+      'auditor', 'fiscal', 'analista', 'técnico'
+    ];
+
+    for (const concurso of concursos) {
+      if (lowerMessage.includes(concurso)) {
+        result.concurso = concurso.toUpperCase();
+        break;
+      }
+    }
+
+    // Detecta áreas
+    const areas = [
+      { pattern: /fiscal|tribut/i, area: 'FISCAL' },
+      { pattern: /polic|segurança/i, area: 'POLICIAL' },
+      { pattern: /tribunal|jur[íi]dic/i, area: 'TRIBUNAIS' },
+      { pattern: /saúde|médic|enferm/i, area: 'SAÚDE' },
+      { pattern: /admin|gest[ãa]o/i, area: 'ADMINISTRATIVA' },
+      { pattern: /banco|financ/i, area: 'BANCÁRIA' },
+    ];
+
+    for (const { pattern, area } of areas) {
+      if (pattern.test(message)) {
+        result.area = area;
+        break;
+      }
+    }
+
+    // Detecta nome (padrões comuns de apresentação)
+    const nomeMatch = message.match(/(?:me chamo|meu nome [ée]|sou o?a?\s*)([A-ZÁÉÍÓÚÂÊÎÔÛÃ][a-záéíóúâêîôûã]+)/i);
+    if (nomeMatch) {
+      result.nome = nomeMatch[1];
+    }
+
+    return result;
+  }
+
+  /**
+   * Detecta objeções na mensagem do usuário
+   */
+  private detectObjection(message: string): string | null {
+    const lowerMessage = message.toLowerCase();
+
+    const objections = [
+      { pattern: /caro|preço|dinheiro|pagar|valor/i, type: 'PREÇO' },
+      { pattern: /tempo|ocupado|não consigo|difícil/i, type: 'TEMPO' },
+      { pattern: /funciona|resultado|serve/i, type: 'EFICÁCIA' },
+      { pattern: /pensar|depois|mais tarde|agora não/i, type: 'ADIAMENTO' },
+      { pattern: /confi|segur|garanti/i, type: 'CONFIANÇA' },
+    ];
+
+    for (const { pattern, type } of objections) {
+      if (pattern.test(lowerMessage)) {
+        return type;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -205,8 +409,12 @@ Tool names: {tool_names}`],
       // Fallback: extrai JSON manualmente
       const jsonMatch = output.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const json = JSON.parse(jsonMatch[0]);
-        return AgentOutputSchema.parse(json);
+        try {
+          const json = JSON.parse(jsonMatch[0]);
+          return AgentOutputSchema.parse(json);
+        } catch {
+          // Continua para fallback final
+        }
       }
 
       // Fallback final: retorna resposta básica conversacional
@@ -228,9 +436,18 @@ Tool names: {tool_names}`],
   }
 
   /**
-   * Limpa a memória de um usuário
+   * Limpa a memória de um usuário (conversa e persistente)
    */
   async clearUserMemory(userId: string): Promise<void> {
     await this.memoryService.clearMemory(userId);
+    // Nota: não limpamos a memória persistente do lead,
+    // apenas a memória de conversa
+  }
+
+  /**
+   * Obtém a memória persistente de um lead
+   */
+  async getLeadMemory(userId: string): Promise<LeadMemory | null> {
+    return await this.leadMemoryService.getLeadMemory(userId);
   }
 }

@@ -27,15 +27,11 @@ export const config = {
     apiVersion: process.env.AZURE_OPENAI_API_VERSION || '2024-02-15-preview',
   },
 
-  // Azure OpenAI (Embeddings)
-  azureOpenAIEmbeddings: {
-    apiKey: process.env.AZURE_OPENAI_EMBEDDINGS_API_KEY || '',
-    endpoint: process.env.AZURE_OPENAI_EMBEDDINGS_ENDPOINT || '',
-    deploymentName:
-      process.env.AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT_NAME ||
-      'text_embedding_ada_002_azure_open_ai',
-    apiVersion:
-      process.env.AZURE_OPENAI_EMBEDDINGS_API_VERSION || '2024-02-15-preview',
+  // Google Gemini (Embeddings)
+  geminiEmbeddings: {
+    credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || './google-credentials.json',
+    projectId: process.env.GOOGLE_PROJECT_ID || 'forefy-462020',
+    model: process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004',
   },
 
   // Supabase
