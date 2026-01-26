@@ -14,7 +14,7 @@ COPY package*.json ./
 
 # Forçar instalação de TODAS as dependências (ignorar NODE_ENV)
 ENV NODE_ENV=development
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 # Copiar código fonte
 COPY . .
@@ -36,7 +36,7 @@ COPY package*.json ./
 
 # Instalar apenas dependências de produção
 ENV NODE_ENV=production
-RUN npm ci --omit=dev && \
+RUN npm ci --omit=dev --legacy-peer-deps && \
     apk del python3 make g++ && \
     rm -rf /var/cache/apk/*
 
