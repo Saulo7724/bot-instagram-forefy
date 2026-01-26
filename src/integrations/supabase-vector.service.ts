@@ -3,6 +3,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { config } from '../config';
 import { vectorLogger as logger } from '../utils/logger';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 
 /**
  * Serviço para interação com o Vector Store do Supabase
@@ -16,11 +18,54 @@ export class SupabaseVectorService {
 
   constructor() {
     // Configura as credenciais do Google
+    this.setupGoogleCredentials();
+  }
+
+  /**
+   * Configura as credenciais do Google Cloud
+   * Suporta tanto arquivo local quanto variável de ambiente com JSON
+   */
+  private setupGoogleCredentials(): void {
+    // Primeiro, verifica se já há GOOGLE_APPLICATION_CREDENTIALS definido
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      const existingPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      if (fs.existsSync(existingPath)) {
+        logger.debug('Usando credenciais Google de arquivo existente', { path: existingPath });
+        return;
+      }
+    }
+
+    // Verifica se há JSON de credenciais na variável de ambiente
+    const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+    if (credentialsJson) {
+      try {
+        // Cria arquivo temporário com as credenciais
+        const tempPath = path.join(os.tmpdir(), 'google-credentials.json');
+        fs.writeFileSync(tempPath, credentialsJson, 'utf8');
+        process.env.GOOGLE_APPLICATION_CREDENTIALS = tempPath;
+        logger.debug('Credenciais Google criadas a partir de variável de ambiente', { path: tempPath });
+        return;
+      } catch (error) {
+        logger.error('Erro ao criar arquivo de credenciais do Google', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    // Fallback: tenta usar arquivo local
     const credentialsPath = path.resolve(
       process.cwd(),
       config.geminiEmbeddings.credentialsPath
     );
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+    if (fs.existsSync(credentialsPath)) {
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialsPath;
+      logger.debug('Usando credenciais Google de arquivo local', { path: credentialsPath });
+    } else {
+      logger.warn('Arquivo de credenciais Google não encontrado', {
+        path: credentialsPath,
+        hint: 'Configure GOOGLE_APPLICATION_CREDENTIALS_JSON com o JSON das credenciais',
+      });
+    }
   }
 
   /**
