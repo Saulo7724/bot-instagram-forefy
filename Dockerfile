@@ -26,6 +26,9 @@ RUN npm run build
 # Stage 2: Production
 FROM node:18-alpine
 
+# Instalar dependências de sistema para módulos nativos
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 # Copiar package files
@@ -33,7 +36,9 @@ COPY package*.json ./
 
 # Instalar apenas dependências de produção
 ENV NODE_ENV=production
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && \
+    apk del python3 make g++ && \
+    rm -rf /var/cache/apk/*
 
 # Copiar build do stage anterior
 COPY --from=builder /app/dist ./dist
